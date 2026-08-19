@@ -1,0 +1,3 @@
+# Stage 4: LLM reasoning for open-ended requests.
+# Works with the OpenAI API or any OpenAI-compatible server (Ollama, LM Studio).
+openai==1.109.1

@@ -1,0 +1,9 @@
+# Stage 2: microphone input and speech-to-text.
+-r requirements.txt
+SpeechRecognition==3.10.4
+PyAudio==0.2.14
+
+# Stage 3: speaker verification (ECAPA-TDNN embeddings).
+torch==2.4.1
+torchaudio==2.4.1
+speechbrain==1.1.0

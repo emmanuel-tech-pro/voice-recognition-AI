@@ -1,0 +1,3 @@
+# Stage 1 needs only the standard library.
+# Typing into the focused window ("type hello John"):
+pyautogui==0.9.54
