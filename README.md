@@ -2,9 +2,10 @@
 
 A voice-controlled automation assistant, built one layer at a time.
 
-Current state: **Stage 1 (typed command engine) and Stage 2 (speech-to-text) are working.**
-Stage 3 (speaker verification) has its interface in place but always trusts the
-microphone for now.
+Current state: **Stages 1-3 are working** — typed commands, speech-to-text, and
+speaker verification that only authorizes the enrolled owner.
+
+Full install / enrollment / tuning / troubleshooting guide: [SETUP.md](SETUP.md).
 
 ## Quick start
 
@@ -22,11 +23,13 @@ python main.py --once "open facebook"
 python main.py --once "type hello, I am building my own AI assistant"
 ```
 
-Voice input (Stage 2):
+Voice (Stages 2-3):
 
 ```bash
 python -m pip install -r requirements-voice.txt
-python main.py --input voice
+python main.py --enroll        # record 5 samples of your voice
+python main.py --verify        # score one phrase, to tune --threshold
+python main.py --input voice   # wake word -> verification -> commands
 ```
 
 On Windows, `pip install PyAudio` normally works; on Linux install
@@ -48,11 +51,19 @@ there rather than editing the parser.
 
 ## Authorization model
 
-Verification happens **once per session**, then commands run without asking again:
+The wake word (`hey assistant`) triggers speaker verification on that same
+utterance; ECAPA-TDNN embeddings of the live audio are compared by cosine
+similarity against the mean of your enrolled samples. Verification happens
+**once per session** — commands then run without asking again:
 
 ```
-similarity 0.96 >= threshold 0.85  ->  SESSION AUTHORIZED  ->  execute
+"hey assistant"  ->  similarity 0.71 >= threshold 0.45  ->  SESSION AUTHORIZED
+"open chrome"    ->  executes, no re-verification
 ```
+
+Other voices score far below the threshold and are ignored. Tune the threshold
+with `python main.py --verify` (see SETUP.md); `--insecure-voice` bypasses
+verification for development only.
 
 Safety modes (`--mode`):
 
@@ -74,16 +85,19 @@ assistant/commands/browser_control.py  open sites and search
 assistant/commands/typing_control.py   type into the focused window
 assistant/executor.py              intent -> handler, applies safety policy
 assistant/security/authorization.py    session + confirmation policy
-assistant/voice/listen.py          microphone -> text
-assistant/voice/speaker_verification.py  stage 3 interface (stub)
-data/voice_profile/                enrolled voice samples (stage 3)
+assistant/voice/listen.py          microphone -> audio + text
+assistant/voice/wake_word.py       wake phrase matching
+assistant/voice/enrollment.py      record the owner's samples
+assistant/voice/profile.py         voice profile storage
+assistant/voice/speaker_verification.py  ECAPA embeddings + cosine similarity
+data/voice_profile/                your enrolled samples (gitignored)
 ```
 
 ## Roadmap
 
 1. ~~Typed command engine~~
 2. ~~Speech-to-text~~
-3. Speaker verification (SpeechBrain ECAPA embeddings vs. enrolled profile) + wake word
+3. ~~Speaker verification (SpeechBrain ECAPA embeddings vs. enrolled profile) + wake word~~
 4. LLM reasoning for open-ended requests
 5. Multi-step computer agent
 

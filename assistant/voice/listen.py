@@ -1,14 +1,25 @@
 """Stage 2: microphone input converted to text.
 
 Uses SpeechRecognition + Google's free web API by default so no model download
-is needed to get the first spoken command working.
+is needed to get the first spoken command working. Captured audio is also
+returned as WAV bytes so stage 3 can verify the speaker on the same utterance.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 
 class SpeechUnavailableError(RuntimeError):
     """Raised when microphone or speech dependencies are missing."""
+
+
+@dataclass(frozen=True)
+class Utterance:
+    """One captured phrase: the raw audio plus its transcription."""
+
+    wav_bytes: bytes
+    text: str
 
 
 class MicrophoneListener:
@@ -34,13 +45,24 @@ class MicrophoneListener:
         with self._sr.Microphone() as source:
             self._recognizer.adjust_for_ambient_noise(source, duration=duration)
 
-    def listen(self) -> str:
-        """Record one phrase and return its transcription ('' if unintelligible)."""
+    def record(self, seconds: float) -> bytes:
+        """Record a fixed-length clip (used when enrolling a voice profile)."""
+        with self._sr.Microphone() as source:
+            audio = self._recognizer.record(source, duration=seconds)
+        return audio.get_wav_data()
+
+    def listen_phrase(self) -> Utterance:
+        """Record one phrase and return its audio plus transcription."""
         with self._sr.Microphone() as source:
             audio = self._recognizer.listen(source, phrase_time_limit=self._phrase_time_limit)
         try:
-            return self._recognizer.recognize_google(audio)
+            text = self._recognizer.recognize_google(audio)
         except self._sr.UnknownValueError:
-            return ""
+            text = ""
         except self._sr.RequestError as exc:
             raise SpeechUnavailableError(f"Speech service unavailable: {exc}") from exc
+        return Utterance(audio.get_wav_data(), text)
+
+    def listen(self) -> str:
+        """Record one phrase and return its transcription ('' if unintelligible)."""
+        return self.listen_phrase().text
