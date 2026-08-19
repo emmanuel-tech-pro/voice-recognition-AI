@@ -1,0 +1,4 @@
+# Stage 2: microphone input and speech-to-text.
+-r requirements.txt
+SpeechRecognition==3.10.4
+PyAudio==0.2.14
