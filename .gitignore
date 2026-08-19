@@ -7,3 +7,4 @@ venv/
 data/voice_profile/*
 !data/voice_profile/.gitkeep
 data/models/
+data/projects.json

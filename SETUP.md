@@ -182,6 +182,79 @@ Launching looks for each candidate on your PATH, so either add the app's folder
 to PATH or put the full `.exe` path in the list. Then `"open obs"` and
 `"open streaming"` both work.
 
+## 8b. Your projects (stage 4)
+
+Copy the sample and put your real folders in it — `data/projects.json` is
+gitignored, so your paths never leave your machine:
+
+```powershell
+copy data\projects.example.json data\projects.json
+notepad data\projects.json
+```
+
+```json
+{
+  "sightfirst hospital": "C:\\Users\\Salem\\projects\\sightfirst",
+  "portfolio": "C:\\Users\\Salem\\projects\\portfolio"
+}
+```
+
+The spoken name is matched loosely, so `"open my hospital project"`,
+`"open sightfirst"` and `"open project sightfirst hospital"` all open the same
+folder in VS Code. Opening needs `code` on PATH (in VS Code: *Ctrl+Shift+P →
+Shell Command: Install 'code' command in PATH*).
+
+## 8c. Natural language with an LLM (stage 4)
+
+Optional. Without it, everything above still works; with it, phrases the parser
+does not recognise are turned into a short plan of the *same* known commands.
+
+```powershell
+python -m pip install -r requirements-llm.txt
+```
+
+Hosted OpenAI:
+
+```powershell
+setx OPENAI_API_KEY "sk-..."     # new terminal afterwards
+python main.py --llm --input voice
+```
+
+Fully local with [Ollama](https://ollama.com) (no API key, nothing leaves your
+machine):
+
+```powershell
+ollama pull llama3.1
+python main.py --llm --llm-model llama3.1 --llm-base-url http://localhost:11434/v1
+```
+
+LM Studio works the same way with `--llm-base-url http://localhost:1234/v1`.
+
+What it looks like:
+
+```
+Command: I want to continue working on my hospital website
+Plan (2 steps):
+  1. open_app: vscode
+  2. open_project: sightfirst hospital
+[OK] Opened vscode
+[OK] Opened sightfirst hospital in VS Code
+```
+
+Safety notes worth knowing before you enable it:
+
+- The model never runs shell commands. It can only return
+  `open_app`, `open_project`, `open_site`, `open_url`, `search` and `type`,
+  and only your configured apps/projects/sites are offered to it.
+- Plans are capped at 6 steps; unknown actions and malformed JSON are dropped,
+  and if nothing valid remains you just get "I did not understand".
+- Every step still passes through the session and confirmation policy, so a
+  dangerous-sounding request still prompts in `normal` and `strict` mode.
+- Your request text (not your audio) is sent to whichever backend you point at.
+  Use Ollama if you'd rather keep that local.
+- If the backend is unreachable, the assistant prints the error and keeps
+  running on deterministic commands.
+
 ## 9. How the security model actually works
 
 ```
@@ -218,6 +291,9 @@ Session: owner, similarity, threshold, safety mode, 30 min idle timeout
 | Someone else gets in | raise `--threshold` (0.55–0.65) and re-enroll with more samples |
 | `PyAudio` build error | use `pipwin install pyaudio` (Windows) or `sudo apt install portaudio19-dev` (Linux) |
 | `type hello` does nothing | pyautogui types into the *focused* window — click the target window first |
+| `Install the reasoning extras` | `pip install -r requirements-llm.txt` |
+| `Reasoning backend unreachable` | start `ollama serve`, or check `OPENAI_API_KEY` / `--llm-base-url` |
+| The plan is empty / "I did not understand" | the model asked for something outside the allowlist; add the app, site or project to your config first |
 | Model download is slow/blocked | it comes from Hugging Face; a proxy or firewall may block it |
 
 ## 11. macOS / Linux differences
@@ -242,11 +318,10 @@ The command engine, session policy, profile handling and wake-word matching are
 all covered by tests that need no microphone; audio capture and the ECAPA model
 are injected behind interfaces so they can be faked.
 
-## 13. What comes next (stages 4-5)
+## 13. What comes next (stage 5)
 
-- **Stage 4 — LLM reasoning:** an interpreter that turns "I want to continue
-  working on my hospital website" into a list of known intents, falling back to
-  the deterministic parser. Keep the parser as the fast path.
-- **Stage 5 — computer agent:** multi-step plans (open editor → open project →
-  run backend → run frontend → report errors) with per-step confirmation in
-  `strict` mode.
+- **Stage 5 — computer agent:** running the project after opening it (start the
+  backend and frontend in a terminal, watch the output, report errors back),
+  plus screen understanding. That needs handlers that can run and supervise
+  processes; the Stage 4 allowlist is deliberately limited to actions that
+  cannot damage anything.

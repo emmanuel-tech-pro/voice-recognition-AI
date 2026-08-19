@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from assistant.commands.browser_control import resolve_site
-from assistant.config import resolve_app_name
+from assistant.config import resolve_app_name, resolve_project
 
 
 class Risk(str, Enum):
@@ -19,6 +19,7 @@ class Risk(str, Enum):
 
 class IntentName(str, Enum):
     OPEN_APP = "open_app"
+    OPEN_PROJECT = "open_project"
     OPEN_SITE = "open_site"
     OPEN_URL = "open_url"
     SEARCH = "search"
@@ -85,6 +86,13 @@ def parse(text: str) -> Intent:
     if search_match:
         return Intent(IntentName.SEARCH, {"query": search_match.group(1)}, risk, raw)
 
+    project_match = re.match(
+        r"^(?:open|launch|start)\s+(?:my\s+)?(?:project\s+(.+)|(.+?)\s+project)$", command
+    )
+    if project_match:
+        project = project_match.group(1) or project_match.group(2)
+        return Intent(IntentName.OPEN_PROJECT, {"project": project}, risk, raw)
+
     open_match = re.match(r"^(?:open|launch|start|go to)\s+(.+)$", command)
     if open_match:
         target = open_match.group(1)
@@ -94,6 +102,8 @@ def parse(text: str) -> Intent:
             return Intent(IntentName.OPEN_APP, {"app": target}, risk, raw)
         if resolve_site(target):
             return Intent(IntentName.OPEN_SITE, {"site": target}, risk, raw)
+        if resolve_project(target):
+            return Intent(IntentName.OPEN_PROJECT, {"project": target}, risk, raw)
         return Intent(IntentName.UNKNOWN, {"target": target}, risk, raw)
 
     return Intent(IntentName.UNKNOWN, risk=risk, raw=raw)

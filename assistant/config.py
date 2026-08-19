@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import platform
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 
 class SafetyMode(str, Enum):
@@ -83,6 +85,28 @@ WEBSITES: dict[str, str] = {
 }
 
 SEARCH_URL = "https://www.google.com/search?q={query}"
+
+# Named project folders, e.g. {"sightfirst": "C:/code/sightfirst"}. Edit this
+# file rather than the code to teach the assistant about your own projects.
+PROJECTS_FILE = Path("data/projects.json")
+
+
+def load_projects(path: Path = PROJECTS_FILE) -> dict[str, str]:
+    """Spoken project name -> folder to open. A missing file means no projects."""
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text())
+    return {" ".join(name.lower().split()): str(folder) for name, folder in data.items()}
+
+
+def resolve_project(spoken: str, projects: dict[str, str] | None = None) -> str | None:
+    """Match a spoken project name, allowing partial names like 'hospital'."""
+    known = load_projects() if projects is None else projects
+    name = " ".join(spoken.lower().split())
+    if name in known:
+        return known[name]
+    matches = [folder for project, folder in known.items() if name in project or project in name]
+    return matches[0] if len(matches) == 1 else None
 
 
 def current_system() -> str:

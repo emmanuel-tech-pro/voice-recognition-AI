@@ -2,8 +2,9 @@
 
 A voice-controlled automation assistant, built one layer at a time.
 
-Current state: **Stages 1-3 are working** — typed commands, speech-to-text, and
-speaker verification that only authorizes the enrolled owner.
+Current state: **Stages 1-4 are working** — typed commands, speech-to-text,
+speaker verification that only authorizes the enrolled owner, and optional LLM
+reasoning for phrases the deterministic parser does not know.
 
 Full install / enrollment / tuning / troubleshooting guide: [SETUP.md](SETUP.md).
 
@@ -44,10 +45,43 @@ On Windows, `pip install PyAudio` normally works; on Linux install
 | `open https://…` | opens the URL |
 | `search <query>` / `google <query>` | Google search |
 | `type <text>` | types into the focused window |
+| `open my hospital project`, `open sightfirst` | opens a registered project folder in VS Code |
 | `help`, `exit` | list commands, quit |
 
 Applications and websites are declared in `assistant/config.py` — add your own
-there rather than editing the parser.
+there rather than editing the parser. Projects live in `data/projects.json`
+(copy `data/projects.example.json`), so paths stay on your machine.
+
+## Stage 4: reasoning for open-ended requests
+
+The deterministic parser is always tried first and never calls a model. Only
+when nothing matches — "I want to continue working on my hospital website" —
+is the request sent to an LLM, which must reply with a short JSON plan:
+
+```bash
+python -m pip install -r requirements-llm.txt
+
+# hosted
+set OPENAI_API_KEY=sk-...
+python main.py --llm --input voice
+
+# or fully local (Ollama)
+ollama serve && ollama pull llama3.1
+python main.py --llm --llm-model llama3.1 --llm-base-url http://localhost:11434/v1
+```
+
+```
+"I want to continue working on my hospital website"
+Plan (2 steps):
+  1. open_app: vscode
+  2. open_project: sightfirst hospital
+```
+
+The model cannot invent actions. Its reply is validated against an allowlist —
+`open_app`, `open_project`, `open_site`, `open_url`, `search`, `type` — capped
+at 6 steps, and anything else is dropped; a plan with nothing valid falls back
+to "I did not understand". There is no shell execution path, and every step
+still goes through the same session and confirmation policy as typed commands.
 
 ## Authorization model
 
@@ -83,6 +117,8 @@ assistant/commands/parser.py       text -> intent (deterministic, no LLM)
 assistant/commands/app_control.py  launch applications
 assistant/commands/browser_control.py  open sites and search
 assistant/commands/typing_control.py   type into the focused window
+assistant/commands/project_control.py  open a registered project in VS Code
+assistant/reasoning/interpreter.py     LLM plan -> validated intents (Stage 4)
 assistant/executor.py              intent -> handler, applies safety policy
 assistant/security/authorization.py    session + confirmation policy
 assistant/voice/listen.py          microphone -> audio + text
@@ -98,7 +134,7 @@ data/voice_profile/                your enrolled samples (gitignored)
 1. ~~Typed command engine~~
 2. ~~Speech-to-text~~
 3. ~~Speaker verification (SpeechBrain ECAPA embeddings vs. enrolled profile) + wake word~~
-4. LLM reasoning for open-ended requests
+4. ~~LLM reasoning for open-ended requests (allowlisted multi-step plans)~~
 5. Multi-step computer agent
 
 ## Development

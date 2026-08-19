@@ -12,9 +12,15 @@ import argparse
 import sys
 from pathlib import Path
 
-from assistant.commands.parser import IntentName, parse
+from assistant.commands.parser import IntentName
 from assistant.config import SafetyMode
-from assistant.executor import HELP_TEXT, execute
+from assistant.executor import HELP_TEXT, execute_plan
+from assistant.reasoning.interpreter import (
+    DEFAULT_MODEL,
+    Interpreter,
+    OpenAIChatClient,
+    ReasoningUnavailableError,
+)
 from assistant.security.authorization import Session, authorize
 from assistant.voice.enrollment import SAMPLE_SECONDS, enroll
 from assistant.voice.listen import MicrophoneListener, SpeechUnavailableError
@@ -32,7 +38,37 @@ def confirm_in_terminal(command: str) -> bool:
     return answer in {"y", "yes"}
 
 
-def run_text_loop(session: Session, *, dry_run: bool) -> int:
+def build_interpreter(args: argparse.Namespace) -> Interpreter:
+    """Stage 4: attach an LLM planner when asked, otherwise stay deterministic."""
+    if not args.llm:
+        return Interpreter()
+    client = OpenAIChatClient(model=args.llm_model, base_url=args.llm_base_url)
+    print(f"Reasoning enabled ({args.llm_model}) for phrases the parser does not match.")
+    return Interpreter(client)
+
+
+def run_plan(
+    interpreter: Interpreter, text: str, session: Session, *, dry_run: bool
+) -> bool:
+    """Plan and run one request; returns False when the user asked to exit."""
+    try:
+        intents = list(interpreter.plan(text))
+    except ReasoningUnavailableError as exc:
+        print(f"[FAILED] {exc}")
+        return True
+    if any(intent.name is IntentName.EXIT for intent in intents):
+        print("Goodbye.")
+        return False
+    if len(intents) > 1:
+        print(f"Plan ({len(intents)} steps):")
+        for index, intent in enumerate(intents, start=1):
+            print(f"  {index}. {intent.raw}")
+    for result in execute_plan(intents, session, dry_run=dry_run, confirm=confirm_in_terminal):
+        print(result)
+    return True
+
+
+def run_text_loop(session: Session, interpreter: Interpreter, *, dry_run: bool) -> int:
     """Stage 1 loop: the keyboard is trusted, so no verification runs."""
     print(HELP_TEXT)
     while True:
@@ -43,17 +79,14 @@ def run_text_loop(session: Session, *, dry_run: bool) -> int:
             text = input("Command: ")
         except EOFError:
             return 0
-        intent = parse(text)
-        if intent.name is IntentName.EXIT:
-            print("Goodbye.")
-            return 0
         if not text.strip():
             continue
-        print(execute(intent, session, dry_run=dry_run, confirm=confirm_in_terminal))
+        if not run_plan(interpreter, text, session, dry_run=dry_run):
+            return 0
 
 
-def run_voice_loop(args: argparse.Namespace, profile: VoiceProfile) -> int:
-    """Stages 2-3: wake word -> speaker verification -> authorized session."""
+def run_voice_loop(args: argparse.Namespace, profile: VoiceProfile, interpreter: Interpreter) -> int:
+    """Stages 2-4: wake word -> speaker verification -> authorized session."""
     listener = MicrophoneListener()
     verifier = build_verifier(profile, insecure=args.insecure_voice)
 
@@ -95,11 +128,8 @@ def run_voice_loop(args: argparse.Namespace, profile: VoiceProfile) -> int:
         else:
             command = utterance.text
 
-        intent = parse(command)
-        if intent.name is IntentName.EXIT:
-            print("Goodbye.")
+        if not run_plan(interpreter, command, session, dry_run=args.dry_run):
             return 0
-        print(execute(intent, session, dry_run=args.dry_run, confirm=confirm_in_terminal))
 
 
 def run_enrollment(args: argparse.Namespace, profile: VoiceProfile) -> int:
@@ -157,6 +187,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="skip speaker verification (development only)",
     )
+    parser.add_argument("--llm", action="store_true", help="use an LLM for unmatched phrases")
+    parser.add_argument("--llm-model", default=DEFAULT_MODEL, help="model name for --llm")
+    parser.add_argument(
+        "--llm-base-url",
+        default=None,
+        help="OpenAI-compatible endpoint, e.g. http://localhost:11434/v1 for Ollama",
+    )
     return parser.parse_args(argv)
 
 
@@ -173,19 +210,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.verify:
             return run_verify(args, profile)
 
+        interpreter = build_interpreter(args)
+
         if args.once:
             session = Session(owner=args.owner, safety_mode=SafetyMode(args.mode))
-            result = execute(parse(args.once), session, dry_run=args.dry_run, confirm=confirm_in_terminal)
-            print(result)
-            return 0 if result.ok else 1
+            results = execute_plan(
+                interpreter.plan(args.once),
+                session,
+                dry_run=args.dry_run,
+                confirm=confirm_in_terminal,
+            )
+            for result in results:
+                print(result)
+            return 0 if all(result.ok for result in results) else 1
 
         if args.input == "voice":
-            return run_voice_loop(args, profile)
+            return run_voice_loop(args, profile, interpreter)
 
         session = Session(owner=args.owner, safety_mode=SafetyMode(args.mode))
         print(f"Typed input trusted for {session.owner}. Safety mode: {session.safety_mode.value}")
-        return run_text_loop(session, dry_run=args.dry_run)
-    except (SpeechUnavailableError, VerifierUnavailableError) as exc:
+        return run_text_loop(session, interpreter, dry_run=args.dry_run)
+    except (SpeechUnavailableError, VerifierUnavailableError, ReasoningUnavailableError) as exc:
         print(exc, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
